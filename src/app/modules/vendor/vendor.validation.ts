@@ -1,18 +1,17 @@
 import { z } from "zod";
 
 export const createVendorSchema = z.object({
-  userId: z.number().int().positive(),
+  userId: z.string(),
   shopName: z
     .string()
     .min(2, "Shop name must be at least 2 characters")
     .max(200),
-  description: z.string().max(1000).optional(),
+  description: z.string(),
 });
 
 export const updateVendorSchema = z.object({
-  shopName: z.string().min(2).max(200).optional(),
-  description: z.string().max(1000).optional(),
-  isActive: z.boolean().optional(),
+  shopName: z.string().optional(),
+  description: z.string().optional(),
 });
 
 export type CreateVendorInput = z.infer<typeof createVendorSchema>;

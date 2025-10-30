@@ -8,6 +8,13 @@
       "when": 1761377404736,
       "tag": "0000_groovy_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1761672423245,
+      "tag": "0001_whole_shen",
+      "breakpoints": true
     }
   ]
 }

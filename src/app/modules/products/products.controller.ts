@@ -1,61 +1,65 @@
 import { Request, Response } from "express";
-import { db } from "../../db";
-import {
-  products,
-  productSpecifications,
-  productWarranty,
-} from "../../db/schema";
 import { eq } from "drizzle-orm";
+import { db } from "../../../db";
+import { products, productSpecifications, productWarranty } from "../../../db/schema";
 
+/**
+ * ✅ Create Product
+ */
 export const createProduct = async (req: Request, res: Response) => {
   try {
     const {
       name,
-      slug,
+      slug, // this is slud
       description,
+      shortDescription,
       categoryId,
       originalPrice,
       discount,
       images,
       tags,
-      sizes,
       specifications,
       warranty,
       vendorId,
+      brandId,
     } = req.body;
 
+    // ✅ Insert new product
     const [newProduct] = await db
       .insert(products)
       .values({
         name,
         slug,
         description,
+        shortDescription,
         categoryId,
         originalPrice,
         discount,
         images,
         tags,
         vendorId,
-        sizes,
+        brandId,
       })
       .returning();
 
-    if (specifications && specifications.length > 0) {
+    // ✅ Insert specifications (if provided)
+    if (Array.isArray(specifications) && specifications.length > 0) {
       await db.insert(productSpecifications).values(
         specifications.map((s: any) => ({
-          productId: newProduct.id,
-          section: s.section,
+          productId: newProduct.productId,
           key: s.key,
           value: s.value,
         }))
       );
     }
 
-    if (warranty) {
+    // ✅ Insert warranty (if provided)
+    if (warranty && typeof warranty === "object") {
       await db.insert(productWarranty).values({
-        productId: newProduct.id,
-        details: warranty,
-        warrantyPeriod: warranty.warrantyPeriod,
+        productId: newProduct.productId,
+        warrantyPeriod: warranty.warrantyPeriod || "",
+        warrantyType: warranty.warrantyType || "",
+        details: warranty.details || "",
       });
     }
 
@@ -65,25 +69,31 @@ export const createProduct = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error("❌ Error creating product:", err);
-    res
-      .status(500)
-      .json({ message: "Error creating product", error: err.message });
+    res.status(500).json({
+      message: "Error creating product",
+      error: err.message,
+    });
   }
 };
 
-// ✅ Get all products
+/**
+ * ✅ Get All Products
+ */
 export const getProducts = async (req: Request, res: Response) => {
   try {
     const allProducts = await db.select().from(products);
     res.json(allProducts);
   } catch (err: any) {
-    res
-      .status(500)
-      .json({ message: "Error fetching products", error: err.message });
+    res.status(500).json({
+      message: "Error fetching products",
+      error: err.message,
+    });
   }
 };
 
-// ✅ Get single product with specs + warranty
+/**
+ * ✅ Get Single Product (with specs + warranty)
+ */
 export const getProductById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -91,33 +101,38 @@ export const getProductById = async (req: Request, res: Response) => {
     const [product] = await db
       .select()
       .from(products)
-      .where(eq(products.id, Number(id)));
+      .where(eq(products.productId, id));
 
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
 
     const specs = await db
       .select()
       .from(productSpecifications)
-      .where(eq(productSpecifications.productId, product.id));
+      .where(eq(productSpecifications.productId, product.productId));
 
-    const warranty = await db
+    const [warranty] = await db
       .select()
       .from(productWarranty)
-      .where(eq(productWarranty.productId, product.id));
+      .where(eq(productWarranty.productId, product.productId));
 
     res.json({
       ...product,
       specifications: specs,
-      warranty: warranty[0] || null,
+      warranty: warranty || null,
     });
   } catch (err: any) {
-    res
-      .status(500)
-      .json({ message: "Error fetching product", error: err.message });
+    res.status(500).json({
+      message: "Error fetching product",
+      error: err.message,
+    });
   }
 };
 
-// ✅ Update product
+/**
+ * ✅ Update Product
+ */
 export const updateProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -125,34 +140,51 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     await db
       .update(products)
-      .set(data)
-      .where(eq(products.id, Number(id)));
+      .set({
+        name: data.name,
+        description: data.description,
+        shortDescription: data.shortDescription,
+        categoryId: data.categoryId,
+        originalPrice: data.originalPrice,
+        discount: data.discount,
+        images: data.images,
+        tags: data.tags,
+        brandId: data.brandId,
+        updatedAt: new Date(),
+      })
+      .where(eq(products.productId, id));
 
-    res.json({ message: "Product updated" });
+    res.json({ message: "✅ Product updated successfully" });
   } catch (err: any) {
-    res
-      .status(500)
-      .json({ message: "Error updating product", error: err.message });
+    res.status(500).json({
+      message: "Error updating product",
+      error: err.message,
+    });
   }
 };
 
-// ✅ Delete product
+/**
+ * ✅ Delete Product (with cascade delete for specs & warranty)
+ */
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
     await db
       .delete(productSpecifications)
-      .where(eq(productSpecifications.productId, Number(id)));
+      .where(eq(productSpecifications.productId, id));
+
     await db
       .delete(productWarranty)
-      .where(eq(productWarranty.productId, Number(id)));
-    await db.delete(products).where(eq(products.id, Number(id)));
+      .where(eq(productWarranty.productId, id));
 
-    res.json({ message: "Product deleted" });
+    await db.delete(products).where(eq(products.productId, id));
+
+    res.json({ message: "🗑️ Product deleted successfully" });
   } catch (err: any) {
-    res
-      .status(500)
-      .json({ message: "Error deleting product", error: err.message });
+    res.status(500).json({
+      message: "Error deleting product",
+      error: err.message,
+    });
   }
 };

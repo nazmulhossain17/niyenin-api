@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { eq, and, count } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   changePasswordSchema,
   createUserSchema,
@@ -9,12 +9,14 @@ import {
 import { db } from "../../../db";
 import { rolesTable, users } from "../../../db/schema";
 import jwt from "jsonwebtoken";
-import { comparePassword, generateAccessToken, hashPassword } from "../../../utils/auth.utils";
+import { comparePassword, hashPassword } from "../../../utils/auth.utils";
 import config from "../../../config/config";
 import generateCookieOptions from "../../../lib/genreateCookieOptions";
 
 
-// ✅ Register new user
+/* ============================
+ * REGISTER USER
+ * ============================ */
 export const registerUser = async (req: Request, res: Response) => {
   try {
     const parsed = createUserSchema.safeParse(req.body);
@@ -25,7 +27,7 @@ export const registerUser = async (req: Request, res: Response) => {
 
     const { firstName, lastName, email, password, phone, address } = parsed.data;
 
-    // Check duplicate email/phone
+    // 🔍 Check if email or phone already exists
     const existing = await db.select().from(users).where(eq(users.email, email));
     if (existing.length > 0)
       return res.status(409).json({ error: "Email already exists" });
@@ -36,18 +38,22 @@ export const registerUser = async (req: Request, res: Response) => {
         return res.status(409).json({ error: "Phone number already exists" });
     }
 
-    // Get the customer role from the database
+    // 🔍 Get "customer" role from roles table
     const [customerRole] = await db
       .select()
       .from(rolesTable)
-      .where(eq(rolesTable.name, 'customer'));
+      .where(eq(rolesTable.name, "customer"));
 
     if (!customerRole) {
-      return res.status(500).json({ error: "Default customer role not found. Please contact administrator." });
+      return res
+        .status(500)
+        .json({ error: "Default customer role not found. Please contact administrator." });
     }
 
+    // 🔐 Hash password
     const hashedPassword = await hashPassword(password);
 
+    // 🧾 Insert user
     const [newUser] = await db
       .insert(users)
       .values({
@@ -57,7 +63,7 @@ export const registerUser = async (req: Request, res: Response) => {
         password: hashedPassword,
         phone,
         address,
-        roleId: customerRole.roleId, // Use the actual roleId, not 'default'
+        roleId: customerRole.roleId,
       })
       .returning({
         userId: users.userId,
@@ -70,13 +76,19 @@ export const registerUser = async (req: Request, res: Response) => {
         createdAt: users.createdAt,
       });
 
-    return res.status(201).json({ user: newUser });
+    return res.status(201).json({
+      message: "User registered successfully",
+      user: newUser,
+    });
   } catch (error) {
     console.error("Registration error:", error);
     return res.status(500).json({ error: "Registration failed" });
   }
 };
-// ✅ Login user
+
+/* ============================
+ * LOGIN USER
+ * ============================ */
 export const login = async (req: Request, res: Response) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
@@ -87,6 +99,7 @@ export const login = async (req: Request, res: Response) => {
 
     const { email, password } = parsed.data;
 
+    // ✅ JOIN rolesTable to get user role info
     const [user] = await db
       .select({
         userId: users.userId,
@@ -96,45 +109,51 @@ export const login = async (req: Request, res: Response) => {
         profilePic: users.profilePic,
         password: users.password,
         isActive: users.isActive,
-        roleLevel: rolesTable.name, // ✅ we’ll now join this correctly
+        roleName: rolesTable.name,
       })
       .from(users)
-      .leftJoin(rolesTable, eq(users.roleId, rolesTable.roleId)) // ✅ JOIN added here
+      .leftJoin(rolesTable, eq(users.roleId, rolesTable.roleId))
       .where(eq(users.email, email))
       .limit(1);
 
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
     if (!user.isActive)
-      return res.status(401).json({ error: "Account is deactivated" });
+      return res.status(403).json({ error: "Account is deactivated" });
 
+    // ✅ Check password
     const isValid = await comparePassword(password, user.password);
     if (!isValid) return res.status(401).json({ error: "Invalid credentials" });
 
-    const jwt_user_token = jwt.sign(
-      {
-        user: {
-            profilePic: user.profilePic,
-            userId: user.userId,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-        }
-      }, config.jwt.secret!
-    )
+    // ✅ Generate JWT token
+    const tokenPayload = {
+      userId: user.userId,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      roleName: user.roleName,
+      profilePic: user.profilePic,
+    };
 
-    res.cookie(config.cookie_token_name!, jwt_user_token, generateCookieOptions())
+    const jwtUserToken = jwt.sign({ user: tokenPayload }, config.jwt.secret!, {
+      expiresIn: "7d",
+    });
+
+    // 🍪 Set HTTP-only cookie
+    res.cookie(config.cookie_token_name!, jwtUserToken, generateCookieOptions());
 
     return res.json({
-        payload: { user: { ...user, password: undefined }, token: jwt_user_token },
-        message: 'loge in success',
-      });
+      message: "Login successful",
+      payload: { user: tokenPayload, token: jwtUserToken },
+    });
   } catch (error) {
     console.error("Login error:", error);
     return res.status(500).json({ error: "Login failed" });
   }
 };
 
-// ✅ Get profile
+/* ============================
+ * GET PROFILE
+ * ============================ */
 export const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
@@ -163,17 +182,19 @@ export const getProfile = async (req: Request, res: Response) => {
   }
 };
 
-// ✅ Update profile
+/* ============================
+ * UPDATE PROFILE
+ * ============================ */
 export const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const parsed = updateUserSchema.safeParse(req.body);
-    if (!parsed.success){
+    if (!parsed.success) {
       const message = parsed.error.issues[0]?.message || "Invalid input";
       return res.status(400).json({ error: message });
-      }
+    }
 
-    const updated = await db
+    const [updated] = await db
       .update(users)
       .set({ ...parsed.data, updatedAt: new Date() })
       .where(eq(users.userId, userId))
@@ -188,23 +209,24 @@ export const updateProfile = async (req: Request, res: Response) => {
         updatedAt: users.updatedAt,
       });
 
-    if (!updated.length)
-      return res.status(404).json({ error: "User not found" });
+    if (!updated) return res.status(404).json({ error: "User not found" });
 
     return res
       .status(200)
-      .json({ user: updated[0], message: "Profile updated successfully" });
+      .json({ user: updated, message: "Profile updated successfully" });
   } catch (error) {
     console.error("Update profile error:", error);
     return res.status(500).json({ error: "Failed to update profile" });
   }
 };
 
-// ✅ Change password
+/* ============================
+ * CHANGE PASSWORD
+ * ============================ */
 export const changePassword = async (req: Request, res: Response) => {
   try {
     const parsed = changePasswordSchema.safeParse(req.body);
-    if (!parsed.success){
+    if (!parsed.success) {
       const message = parsed.error.issues[0]?.message || "Invalid input";
       return res.status(400).json({ error: message });
     }
@@ -237,7 +259,10 @@ export const changePassword = async (req: Request, res: Response) => {
   }
 };
 
-const getLoggedInUser = async (req: Request, res: Response) => {
+/* ============================
+ * GET LOGGED-IN USER (whoAmI)
+ * ============================ */
+export const getLoggedInUser = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const [user] = await db

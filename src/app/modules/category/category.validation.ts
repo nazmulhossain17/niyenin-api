@@ -1,21 +1,42 @@
 import { z } from "zod";
-
-const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
+/**
+ * 🧾 Schema for creating a new category
+ */
 export const createCategorySchema = z.object({
-  name: z
-    .string()
-    .min(2, "Category name must be at least 2 characters")
-    .max(100),
-  slug: z.string().regex(slugRegex, "Slug must be lowercase with hyphens only"),
-  parentId: z.number().int().positive().optional(),
+  body: z.object({
+    name: z
+      .string()
+      .min(2, { message: "Category name must be at least 2 characters long" }),
+    slug: z
+      .string()
+      .regex(/^[a-z0-9-]+$/, { message: "Slug must be URL-friendly" })
+      .min(2, { message: "Slug must be at least 2 characters" }),
+    parentId: z.string().min(4, { message: "Invalid parent category ID" }).nullable()
+  }),
 });
 
+/**
+ * 🧾 Schema for updating a category
+ */
 export const updateCategorySchema = z.object({
-  name: z.string().min(2).max(100).optional(),
-  slug: z.string().regex(slugRegex).optional(),
-  parentId: z.number().int().positive().nullable().optional(),
+  body: z.object({
+    name: z.string().min(2).optional(),
+    slug: z
+      .string()
+      .regex(/^[a-z0-9-]+$/, { message: "Slug must be URL-friendly" })
+      .optional(),
+    parentId: z.string().nullable().optional(),
+  }),
+  params: z.object({
+    id: z.string().uuid({ message: "Invalid category ID" }),
+  }),
 });
 
-export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
-export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
+/**
+ * 🧾 Schema for validating route params (e.g. get/delete by ID)
+ */
+export const categoryIdSchema = z.object({
+  params: z.object({
+    id: z.string().uuid({ message: "Invalid category ID" }),
+  }),
+});

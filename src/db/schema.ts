@@ -128,6 +128,7 @@ export const categories = pgTable(
     slug: varchar("slug", { length: 100 }).notNull().unique(),
     parentId: uuid("parent_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => ({
     categorySlugUq: uniqueIndex("categories_slug_uq").on(t.slug),
